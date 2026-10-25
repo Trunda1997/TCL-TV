@@ -1,0 +1,8 @@
+TCL TV 0.1
+
+Status:
+- standalone Android-TV project
+- native Java UI
+- HDMI logic adapted from TCL Home only
+- GitHub Actions APK build configured
+- provider/content integrations remain demo data in 0.1
