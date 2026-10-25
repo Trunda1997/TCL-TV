@@ -2,8 +2,8 @@ package de.tcltv.launcher;
 
 public enum DeviceBrand {
     HDMI("Externes Gerät", "HDMI"),
-    PLAYSTATION("PlayStation 5", "PS"),
-    XBOX("Xbox Series X", "XBOX"),
+    PLAYSTATION("PlayStation", "PS"),
+    XBOX("Xbox", "XBOX"),
     SWITCH2("Nintendo Switch 2", "SWITCH"),
     NINTENDO("Nintendo Switch", "SWITCH"),
     APPLE_TV("Apple TV", "tv"),

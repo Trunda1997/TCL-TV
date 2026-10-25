@@ -1,6 +1,8 @@
 name: Build TCL TV APK
 
 on:
+  pull_request:
+    branches: [main]
   workflow_dispatch:
   push:
     branches: [main]
@@ -37,10 +39,13 @@ jobs:
       - name: Build debug APK
         run: gradle :app:assembleDebug --stacktrace
 
+      - name: Check TV navigation and Android compatibility
+        run: gradle :app:testDebugUnitTest :app:lintDebug --stacktrace
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: TCL-TV-0.1-debug-apk
+          name: TCL-TV-0.2-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14

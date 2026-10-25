@@ -1,1 +1,1 @@
-Trigger for the first TCL TV 0.1 GitHub Actions APK build.
+TCL TV 0.2.0: Debug-APK und automatisierte TV-Prüfungen.

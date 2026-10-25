@@ -40,13 +40,19 @@ public final class LauncherUtils {
     public static boolean launchPackage(Activity a, String pkg) {
         if (pkg == null || pkg.isEmpty()) return false;
         try {
-            Intent i = a.getPackageManager().getLeanbackLaunchIntentForPackage(pkg);
-            if (i == null) i = a.getPackageManager().getLaunchIntentForPackage(pkg);
-            if (i != null) {
-                a.startActivity(i);
+            Intent leanback = a.getPackageManager().getLeanbackLaunchIntentForPackage(pkg);
+            if (AppRepository.resolveLaunch(a.getPackageManager(), leanback, pkg, a.getPackageName()) != null) {
+                a.startActivity(leanback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED));
                 return true;
             }
-        } catch (Exception ignored) {}
+        } catch (RuntimeException ignored) { }
+        try {
+            Intent launcher = a.getPackageManager().getLaunchIntentForPackage(pkg);
+            if (AppRepository.resolveLaunch(a.getPackageManager(), launcher, pkg, a.getPackageName()) != null) {
+                a.startActivity(launcher.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED));
+                return true;
+            }
+        } catch (RuntimeException ignored) { }
         return false;
     }
 }
