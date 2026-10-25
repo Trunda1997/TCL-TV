@@ -238,6 +238,7 @@ public class TvNavigationTest {
                     key(activity, KeyEvent.KEYCODE_DPAD_DOWN);
                 }
                 activity.onBackPressed();
+                if ("Apps".equals(tab.getText().toString())) activity.onBackPressed();
                 assertEquals("Home", field(activity, "currentTab"));
                 assertSame(nav.get(0), activity.getWindow().getDecorView().findFocus());
             }

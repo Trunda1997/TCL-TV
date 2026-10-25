@@ -3,10 +3,8 @@ package de.tcltv.launcher;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
-import android.net.Uri;
 import android.os.Bundle;
 import android.os.Build;
 import android.os.Handler;
@@ -34,7 +32,6 @@ import java.util.Set;
 
 public class MainActivity extends Activity {
     private static final int PICK_BACKGROUND = 4001;
-    private static final int BG = Color.rgb(14, 17, 21);
     private static final int CARD = Color.argb(224, 42, 47, 55);
     private static final int CARD_FOCUS = Color.argb(248, 62, 68, 78);
 
@@ -45,23 +42,33 @@ public class MainActivity extends Activity {
     private final List<LinearLayout> rows = new ArrayList<>();
     private TextView settings;
     private TextView clock;
-    private AnimatedBackgroundView background;
-    private ImageView customBackground;
+    private BackgroundController backgroundController;
+    private AppsScreen appsScreen;
+    private BackgroundScreen backgroundScreen;
+    private FavoriteApps favorites;
+    private LinearLayout favoritesRow;
+    private TvSearchDialog searchDialog;
     private HdmiRepository hdmiRepository;
     private AppRepository appRepository;
-    private SharedPreferences prefs;
-    private String appSnapshot;
     private String currentTab = "Home";
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         hdmiRepository = new HdmiRepository(this);
         appRepository = new AppRepository(this);
-        prefs = getSharedPreferences("tcl_tv", MODE_PRIVATE);
+        favorites = new FavoriteApps(this);
+        favorites.initialize(appRepository.installedTvApps());
         buildShell();
-        applySavedBackground();
+        backgroundController.apply();
         showTab(savedInstanceState == null ? "Home" : savedInstanceState.getString("tab", "Home"));
         activeNav().requestFocus();
+        if (savedInstanceState != null) {
+            String key = savedInstanceState.getString("focus_tag");
+            if (key != null) content.post(() -> {
+                View target = content.findViewWithTag(key);
+                if (target != null) TvFocus.reveal(target, View.FOCUS_DOWN);
+            });
+        }
         if (Build.VERSION.SDK_INT >= 33) {
             getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
                     android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, this::handleBack);
@@ -73,35 +80,42 @@ public class MainActivity extends Activity {
         hdmiRepository.start(() -> {
             if ("Home".equals(currentTab)) refreshHomeHdmi();
         });
+        appRepository.start(this::onAppsChanged);
+        backgroundController.start();
         handler.post(clockTick);
     }
 
     @Override protected void onResume() {
         super.onResume();
-        StringBuilder signature = new StringBuilder();
-        for (AppEntry app : appRepository.installedTvApps())
-            signature.append(app.packageName).append(':').append(app.name).append(';');
-        String next = signature.toString();
-        if (appSnapshot != null && !appSnapshot.equals(next)
-                && ("Home".equals(currentTab) || "Apps".equals(currentTab))) {
-            View focused = getCurrentFocus();
-            Object key = focused == null ? null : focused.getTag();
-            boolean wasInContent = content.hasFocus();
-            showTab(currentTab);
-            if (wasInContent) {
-                View target = key == null ? null : content.findViewWithTag(key);
-                if (target != null) target.requestFocus();
-                else if (!rows.isEmpty()) TvFocus.enterRow(rows.get(0), 0);
-            }
-        }
-        appSnapshot = next;
-        if (getCurrentFocus() == null) activeNav().requestFocus();
+        if (getWindow().getDecorView().findFocus() == null) activeNav().requestFocus();
+    }
+
+    private void onAppsChanged() {
+        favorites.initialize(appRepository.installedTvApps());
+        if ("Home".equals(currentTab)) refreshFavorites();
+        else if ("Apps".equals(currentTab) && appsScreen != null) appsScreen.refresh();
+    }
+
+    @Override public void onWindowFocusChanged(boolean focused) {
+        super.onWindowFocusChanged(focused);
+        // TCL Home rebinds after native keyboards and external apps return.
+        if (focused && content != null) handler.post(this::wireNavigation);
     }
 
     @Override protected void onStop() {
         hdmiRepository.stop();
+        appRepository.stop();
+        backgroundController.stop();
         handler.removeCallbacks(clockTick);
         super.onStop();
+    }
+
+    @Override protected void onDestroy() {
+        if (searchDialog != null) searchDialog.dismiss();
+        appRepository.close();
+        backgroundController.destroy();
+        handler.removeCallbacksAndMessages(null);
+        super.onDestroy();
     }
 
     private final Runnable clockTick = new Runnable() {
@@ -115,16 +129,9 @@ public class MainActivity extends Activity {
 
     private void buildShell() {
         FrameLayout root = new FrameLayout(this);
-        background = new AnimatedBackgroundView(this);
         root.setClipChildren(false);
         root.setClipToPadding(false);
-        root.addView(background, match());
-
-        customBackground = new ImageView(this);
-        customBackground.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        customBackground.setAlpha(0.52f);
-        customBackground.setVisibility(View.GONE);
-        root.addView(customBackground, match());
+        backgroundController = new BackgroundController(this, root);
 
         LinearLayout shell = new LinearLayout(this);
         shell.setOrientation(LinearLayout.VERTICAL);
@@ -204,6 +211,9 @@ public class MainActivity extends Activity {
         currentTab = tab;
         updateNav();
         hdmiRow = null;
+        favoritesRow = null;
+        appsScreen = null;
+        backgroundScreen = null;
         rows.clear();
         content.removeAllViews();
         if ("Home".equals(tab)) buildHome();
@@ -233,7 +243,8 @@ public class MainActivity extends Activity {
         refreshHomeHdmi();
         spacer(28);
         section("Favoriten-Apps");
-        buildFavorites(addRow());
+        favoritesRow = addRow();
+        buildFavorites(favoritesRow);
         spacer(26);
         section("Weiterschauen");
         LinearLayout row = addRow();
@@ -278,7 +289,7 @@ public class MainActivity extends Activity {
         mark.setImageResource(DeviceLogo.resource(input.brand));
         mark.setContentDescription(input.brand.displayName);
         ((TextView) tile.getChildAt(1)).setText(input.displayName);
-        tile.setOnClickListener(v -> LauncherUtils.openHdmi(this, input.id));
+        tile.setOnClickListener(v -> LauncherUtils.openHdmi(this, input.openId));
         tile.setOnLongClickListener(v -> { showHdmiEditor(input); return true; });
     }
 
@@ -297,7 +308,7 @@ public class MainActivity extends Activity {
         name.setSingleLine(true);
         name.setGravity(Gravity.CENTER);
         tile.addView(name, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36)));
-        tile.setOnClickListener(v -> LauncherUtils.openHdmi(this, input.id));
+        tile.setOnClickListener(v -> LauncherUtils.openHdmi(this, input.openId));
         tile.setOnLongClickListener(v -> {
             showHdmiEditor(input);
             return true;
@@ -307,12 +318,14 @@ public class MainActivity extends Activity {
     }
 
     private void showHdmiEditor(HdmiInput input) {
-        String[] names = new String[DeviceBrand.values().length + 2];
+        String[] names = new String[DeviceBrand.values().length + 3];
         names[0] = "Automatisch erkennen";
         names[1] = "Gerätename manuell ändern";
         for (int i = 0; i < DeviceBrand.values().length; i++) names[i + 2] = DeviceBrand.values()[i].displayName;
+        names[names.length - 1] = "Gespeichertes Gerät vergessen";
         new AlertDialog.Builder(this).setTitle(input.displayName).setItems(names, (d, which) -> {
-            if (which == 0) hdmiRepository.clearOverrides(input.id);
+            if (which == names.length - 1) hdmiRepository.forgetKnownDevice(input.id);
+            else if (which == 0) hdmiRepository.clearOverrides(input.id);
             else if (which == 1) {
                 EditText e = new EditText(this);
                 e.setSingleLine(true);
@@ -330,29 +343,43 @@ public class MainActivity extends Activity {
     }
 
     private void buildFavorites(LinearLayout row) {
-        List<AppEntry> apps = appRepository.installedTvApps();
-        Set<String> fav = new HashSet<>(prefs.getStringSet("favorites", new HashSet<>()));
-        if (!prefs.getBoolean("favorites_edited", false)) {
-            String[] preferred = {"youtube", "netflix", "prime", "amazon", "disney", "apple", "wow", "rtl", "joyn", "waipu", "zattoo", "ard", "zdf", "spotify"};
-            for (String key : preferred) {
-                for (AppEntry app : apps) {
-                    if (app.name.toLowerCase(Locale.ROOT).contains(key)) fav.add(app.packageName);
-                }
-            }
-            if (fav.isEmpty()) {
-                for (int i = 0; i < Math.min(7, apps.size()); i++) fav.add(apps.get(i).packageName);
-            }
-            // Recalculate defaults until edited, and persist the effective set for the editor.
-            prefs.edit().putStringSet("favorites", fav).apply();
-        }
-        int count = 0;
-        for (AppEntry app : apps) {
-            if (fav.contains(app.packageName)) {
-                row.addView(appTile(app, false));
-                count++;
+        List<AppEntry> installed = appRepository.installedTvApps();
+        for (String pkg : favorites.packages()) {
+            for (AppEntry app : installed) {
+                if (pkg.equals(app.packageName)) { row.addView(appTile(app, true)); break; }
             }
         }
-        if (count == 0) row.addView(iconTile("+", "Apps auswählen", v -> showTab("Apps")));
+        if (row.getChildCount() == 0) row.addView(iconTile("+", "Apps auswählen", v -> showTab("Apps")));
+    }
+
+    private void refreshFavorites() {
+        if (favoritesRow == null) return;
+        View focused = favoritesRow.findFocus();
+        Object key = focused == null ? null : focused.getTag();
+        int index = focused == null ? 0 : favoritesRow.indexOfChild(focused);
+        java.util.Map<String, View> existing = new java.util.HashMap<>();
+        for (int i = 0; i < favoritesRow.getChildCount(); i++) {
+            View tile = favoritesRow.getChildAt(i);
+            if (tile.getTag() instanceof String) existing.put((String) tile.getTag(), tile);
+        }
+        favoritesRow.removeAllViews();
+        List<AppEntry> installed = appRepository.installedTvApps();
+        for (String pkg : favorites.packages()) {
+            for (AppEntry app : installed) {
+                if (!pkg.equals(app.packageName)) continue;
+                View tile = existing.get("app:" + pkg);
+                favoritesRow.addView(tile == null ? appTile(app, true) : tile);
+                break;
+            }
+        }
+        if (favoritesRow.getChildCount() == 0)
+            favoritesRow.addView(iconTile("+", "Apps auswählen", v -> showTab("Apps")));
+        wireNavigation();
+        if (focused != null) {
+            View target = key == null ? null : favoritesRow.findViewWithTag(key);
+            if (target == null) target = favoritesRow.getChildAt(Math.min(index, favoritesRow.getChildCount() - 1));
+            TvFocus.reveal(target, View.FOCUS_DOWN);
+        }
     }
 
     private void buildMovies(boolean series) {
@@ -375,23 +402,10 @@ public class MainActivity extends Activity {
     }
 
     private void buildApps() {
-        addSearchBar("Apps suchen …");
-        spacer(24);
-        section("App-Kategorien");
-        LinearLayout cats = addRow();
-        for (String c : new String[]{"Streaming", "Musik", "Sport", "Mediatheken", "Spiele", "Tools"}) cats.addView(genreTile(c));
-
-        spacer(24);
-        section("Installierte Apps");
-        LinearLayout apps = addRow();
-        for (AppEntry app : appRepository.installedTvApps()) apps.addView(appTile(app, true));
-
-        spacer(24);
-        section("Empfohlen");
-        LinearLayout providers = addRow();
-        for (String p : new String[]{"Netflix", "Prime Video", "Disney+", "Apple TV", "WOW", "RTL+", "YouTube"}) {
-            providers.addView(providerTile(p));
-        }
+        appsScreen = new AppsScreen(this, appRepository, app -> appTile(app, true),
+                this::showSearchDialog, this::wireNavigation);
+        content.addView(appsScreen.root());
+        rows.addAll(appsScreen.rows());
     }
 
     private View appTile(AppEntry app, boolean editable) {
@@ -405,6 +419,8 @@ public class MainActivity extends Activity {
         TextView name = text(app.name, 13, false);
         name.setSingleLine(true);
         name.setGravity(Gravity.CENTER);
+        if ("Apps".equals(currentTab) && favorites.contains(app.packageName)) name.setText(app.name + " ★");
+        tile.setContentDescription(app.name + (favorites.contains(app.packageName) ? ", Favorit" : ""));
         tile.addView(name, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(32)));
         tile.setTag("app:" + app.packageName);
         tile.setOnClickListener(v -> {
@@ -422,17 +438,22 @@ public class MainActivity extends Activity {
     }
 
     private void toggleFavorite(String pkg) {
-        Set<String> fav = new HashSet<>(prefs.getStringSet("favorites", new HashSet<>()));
-        boolean added;
-        if (fav.contains(pkg)) {
-            fav.remove(pkg);
-            added = false;
-        } else {
-            fav.add(pkg);
-            added = true;
-        }
-        prefs.edit().putStringSet("favorites", fav).putBoolean("favorites_edited", true).apply();
+        boolean added = favorites.toggle(pkg);
+        if ("Home".equals(currentTab)) refreshFavorites();
+        updateFavoriteBadges();
         Toast.makeText(this, added ? "Zu Favoriten hinzugefügt" : "Aus Favoriten entfernt", Toast.LENGTH_SHORT).show();
+    }
+
+    private void updateFavoriteBadges() {
+        for (LinearLayout row : rows) for (int i = 0; i < row.getChildCount(); i++) {
+            View tile = row.getChildAt(i);
+            for (AppEntry app : appRepository.installedTvApps()) {
+                if (!("app:" + app.packageName).equals(tile.getTag())) continue;
+                boolean selected = favorites.contains(app.packageName);
+                ((TextView) ((LinearLayout) tile).getChildAt(1)).setText(app.name + (selected && "Apps".equals(currentTab) ? " ★" : ""));
+                tile.setContentDescription(app.name + (selected ? ", Favorit, lang drücken zum Entfernen" : ", lang drücken zum Hinzufügen"));
+            }
+        }
     }
 
     private void buildLiveTv() {
@@ -452,46 +473,9 @@ public class MainActivity extends Activity {
     }
 
     private void buildBackgrounds() {
-        section("Hintergrund");
-        LinearLayout modes = addRow();
-        modes.addView(iconTile("▧", "Empfohlen", v -> setBackground("neutral")));
-        modes.addView(iconTile("▶", "Live-Hintergründe", v -> setBackground("live")));
-        modes.addView(iconTile("▣", "Eigene Bilder", v -> pickBackgroundImage()));
-
-        spacer(28);
-        section("Farben & neutrale Hintergründe");
-        LinearLayout colors = addRow();
-        colors.addView(colorTile("Dunkelgrau", Color.rgb(18,22,28), Color.rgb(46,52,62), false, "neutral"));
-        colors.addView(colorTile("Graphit", Color.rgb(15,17,20), Color.rgb(36,40,46), false, "graphite"));
-        colors.addView(colorTile("Nachtblau", Color.rgb(11,18,28), Color.rgb(30,47,65), false, "midnight"));
-        colors.addView(colorTile("Live – dezent", Color.rgb(12,18,27), Color.rgb(47,60,76), true, "live"));
-    }
-
-    private View colorTile(String title, int a, int b, boolean live, String key) {
-        LinearLayout tile = cardLayout(dp(210), dp(130));
-        tile.setOrientation(LinearLayout.VERTICAL);
-        tile.setGravity(Gravity.CENTER);
-        View swatch = new View(this);
-        GradientDrawable grad = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{a, b});
-        grad.setCornerRadius(dp(20));
-        swatch.setBackground(grad);
-        tile.addView(swatch, new LinearLayout.LayoutParams(dp(120), dp(62)));
-        TextView t = text(title, 14, false);
-        t.setGravity(Gravity.CENTER);
-        tile.addView(t, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34)));
-        tile.setOnClickListener(v -> {
-            prefs.edit().putString("background_mode", key).remove("background_uri").apply();
-            customBackground.setVisibility(View.GONE);
-            background.setMode(a, b, live);
-        });
-        applyFocus(tile);
-        return margin(tile, 14);
-    }
-
-    private void setBackground(String key) {
-        prefs.edit().putString("background_mode", key).remove("background_uri").apply();
-        customBackground.setVisibility(View.GONE);
-        applySavedBackground();
+        backgroundScreen = new BackgroundScreen(this, backgroundController, this::pickBackgroundImage);
+        content.addView(backgroundScreen.root);
+        rows.addAll(backgroundScreen.rows);
     }
 
     private void pickBackgroundImage() {
@@ -508,61 +492,14 @@ public class MainActivity extends Activity {
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == PICK_BACKGROUND && resultCode == RESULT_OK && data != null && data.getData() != null) {
-            Uri uri = data.getData();
-            try {
-                getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            } catch (Exception ignored) {}
-            prefs.edit().putString("background_uri", uri.toString()).putString("background_mode", "custom").apply();
-            applySavedBackground();
+            backgroundController.onImagePicked(data);
         }
-    }
-
-    private void applySavedBackground() {
-        String mode = prefs.getString("background_mode", "neutral");
-        String uri = prefs.getString("background_uri", null);
-        if ("custom".equals(mode) && uri != null) {
-            try {
-                customBackground.setImageURI(Uri.parse(uri));
-                customBackground.setVisibility(View.VISIBLE);
-                background.setMode(Color.rgb(10,12,16), Color.rgb(22,26,32), false);
-                return;
-            } catch (Exception ignored) {}
-        }
-        customBackground.setVisibility(View.GONE);
-        if ("graphite".equals(mode)) background.setMode(Color.rgb(15,17,20), Color.rgb(36,40,46), false);
-        else if ("midnight".equals(mode)) background.setMode(Color.rgb(11,18,28), Color.rgb(30,47,65), false);
-        else if ("live".equals(mode)) background.setMode(Color.rgb(12,18,27), Color.rgb(47,60,76), true);
-        else background.setMode(Color.rgb(18,22,28), Color.rgb(46,52,62), false);
     }
 
     private void showSearchDialog() {
-        EditText input = new EditText(this);
-        input.setHint("Filme, Serien oder Apps suchen");
-        input.setSingleLine(true);
-        new AlertDialog.Builder(this)
-                .setTitle("Suche")
-                .setView(input)
-                .setPositiveButton("Suchen", (d, w) -> performSearch(input.getText().toString()))
-                .setNegativeButton("Abbrechen", null)
-                .show();
-    }
-
-    private void addSearchBar(String hint) {
-        LinearLayout row = addRow();
-        row.addView(iconTile("⌕", hint, v -> showSearchDialog()));
-    }
-
-    private void performSearch(String q) {
-        String query = q == null ? "" : q.trim().toLowerCase(Locale.ROOT);
-        if (query.isEmpty()) return;
-        for (AppEntry app : appRepository.installedTvApps()) {
-            if (app.name.toLowerCase(Locale.ROOT).contains(query)) {
-                LauncherUtils.launchPackage(this, app.packageName);
-                return;
-            }
-        }
-        Toast.makeText(this, "Keine installierte App gefunden – Store-Suche wird geöffnet.", Toast.LENGTH_SHORT).show();
-        LauncherUtils.openPlayStore(this, q);
+        if (searchDialog != null && searchDialog.isShowing()) return;
+        searchDialog = new TvSearchDialog(this, appRepository);
+        searchDialog.show();
     }
 
     private View providerTile(String name) {
@@ -733,12 +670,16 @@ public class MainActivity extends Activity {
     @Override public void onBackPressed() { handleBack(); }
 
     private void handleBack() {
+        if ("Apps".equals(currentTab) && appsScreen != null && appsScreen.onBack()) return;
         if (!"Home".equals(currentTab)) showTab("Home");
         activeNav().requestFocus();
     }
 
     @Override protected void onSaveInstanceState(Bundle state) {
         state.putString("tab", currentTab);
+        View focused = content.findFocus();
+        if (focused != null && focused.getTag() instanceof String)
+            state.putString("focus_tag", (String) focused.getTag());
         super.onSaveInstanceState(state);
     }
 

@@ -2,6 +2,13 @@ package de.tcltv.launcher;
 
 import android.content.Context;
 import android.content.Intent;
+import android.content.BroadcastReceiver;
+import android.content.IntentFilter;
+import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import android.content.pm.PackageManager;
 import android.content.pm.ActivityInfo;
 import android.content.pm.ApplicationInfo;
@@ -26,12 +33,82 @@ public final class AppRepository {
         "com.zdf.android.mediathek.tv", "com.spotify.tv.android", "com.spotify.music"
     };
     private final Context context;
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private List<AppEntry> cached;
+    private Runnable listener;
+    private boolean registered, firstStart = true, loading, reloadRequested, pendingChanged, closed;
+    private final BroadcastReceiver packagesChanged = new BroadcastReceiver() {
+        @Override public void onReceive(Context c, Intent intent) {
+            if (Intent.ACTION_PACKAGE_REMOVED.equals(intent.getAction())
+                    && intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) return;
+            requestRefresh();
+        }
+    };
 
     public AppRepository(Context context) {
-        this.context = context;
+        this.context = context.getApplicationContext();
     }
 
-    public List<AppEntry> installedTvApps() {
+    public synchronized List<AppEntry> installedTvApps() {
+        if (cached == null) cached = discover();
+        return new ArrayList<>(cached);
+    }
+
+    // As in TCL Home: background discovery + package notifications; UI reads the snapshot.
+    public void start(Runnable changed) {
+        listener = changed;
+        if (pendingChanged) { pendingChanged = false; listener.run(); }
+        if (!registered) {
+            IntentFilter filter = new IntentFilter();
+            filter.addAction(Intent.ACTION_PACKAGE_ADDED);
+            filter.addAction(Intent.ACTION_PACKAGE_REMOVED);
+            filter.addAction(Intent.ACTION_PACKAGE_CHANGED);
+            filter.addAction(Intent.ACTION_PACKAGE_REPLACED);
+            filter.addDataScheme("package");
+            if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(packagesChanged, filter, Context.RECEIVER_NOT_EXPORTED);
+            else context.registerReceiver(packagesChanged, filter);
+            registered = true;
+        }
+        if (!firstStart || cached == null) requestRefresh();
+        firstStart = false;
+    }
+    public void stop() {
+        listener = null;
+        if (registered) { context.unregisterReceiver(packagesChanged); registered = false; }
+    }
+    public void close() { stop(); closed = true; worker.shutdownNow(); main.removeCallbacksAndMessages(null); }
+    private void requestRefresh() {
+        if (closed) return;
+        if (loading) { reloadRequested = true; return; }
+        loading = true;
+        worker.execute(() -> {
+            List<AppEntry> next = discover();
+            main.post(() -> {
+                if (closed) return;
+                boolean changed;
+                synchronized (this) {
+                    changed = !sameApps(cached, next);
+                    cached = next;
+                }
+                loading = false;
+                if (changed) {
+                    if (listener != null) listener.run();
+                    else pendingChanged = true;
+                }
+                if (reloadRequested) { reloadRequested = false; requestRefresh(); }
+            });
+        });
+    }
+    static boolean sameApps(List<AppEntry> a, List<AppEntry> b) {
+        if (a == null || a.size() != b.size()) return false;
+        for (int i = 0; i < a.size(); i++) {
+            if (!a.get(i).packageName.equals(b.get(i).packageName) || !a.get(i).name.equals(b.get(i).name)) return false;
+        }
+        return true;
+    }
+
+    private List<AppEntry> discover() {
         PackageManager pm = context.getPackageManager();
         Map<String, AppEntry> unique = new LinkedHashMap<>();
 
