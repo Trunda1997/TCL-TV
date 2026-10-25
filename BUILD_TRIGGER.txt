@@ -1,0 +1,1 @@
+Trigger for the first TCL TV 0.1 GitHub Actions APK build.
