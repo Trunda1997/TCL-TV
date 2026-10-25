@@ -226,6 +226,19 @@ public class HdmiStandbyTest {
         repository.stop();
     }
 
+    @Test public void targetTclHardwareIdsMapToPhysicalHdmiNumbers() {
+        assertEquals("HDMI 1", HdmiRepository.safeName(
+                "com.tcl.tvinput/.TvPassThroughService/HW15"));
+        assertEquals("HDMI 4", HdmiRepository.safeName(
+                "com.tcl.tvinput/.TvPassThroughService/HW18"));
+        reported.add(new HdmiRepository.InputDescriptor(
+                "com.tcl.tvinput/.TvPassThroughService/HW17", null, "", "", "", 2));
+        HdmiRepository repository = repository();
+        repository.start(() -> {});
+        assertEquals("HDMI 3", repository.list().get(0).displayName);
+        repository.stop();
+    }
+
     @Test public void clearingManualOverrideKeepsRememberedStandbyDevice() {
         reported.add(parent(0));
         reported.add(device("cec-ps5", "PS5"));

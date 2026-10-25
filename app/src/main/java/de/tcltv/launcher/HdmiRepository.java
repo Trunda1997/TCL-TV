@@ -287,11 +287,16 @@ public final class HdmiRepository {
     }
 
     private static final Pattern HDMI_PORT = Pattern.compile("(?i)\\bHDMI[\\s_-]*([1-9][0-9]?)\\b");
+    // Verified on the target TCL firmware: TvInput hardware IDs 15..18 map to HDMI ports 1..4.
+    private static final Pattern TCL_HARDWARE_INPUT = Pattern.compile(
+            "(?i)^com\\.tcl\\.tvinput/[^/]+/HW(1[5-8])$");
 
     static String safeName(String raw) {
         String name = raw == null ? "" : raw.trim();
         Matcher port = HDMI_PORT.matcher(name);
         if (port.find()) return "HDMI " + port.group(1);
+        String tclPort = tclPortName(name);
+        if (tclPort != null) return tclPort;
         if (!isDescriptive(name)) return "HDMI";
         return name;
     }
@@ -302,7 +307,17 @@ public final class HdmiRepository {
             Matcher port = HDMI_PORT.matcher(candidate == null ? "" : candidate);
             if (port.find()) return "HDMI " + port.group(1);
         }
+        for (String candidate : candidates) {
+            String tclPort = tclPortName(candidate);
+            if (tclPort != null) return tclPort;
+        }
         return "HDMI";
+    }
+
+    private static String tclPortName(String raw) {
+        Matcher hardware = TCL_HARDWARE_INPUT.matcher(raw == null ? "" : raw.trim());
+        if (!hardware.matches()) return null;
+        return "HDMI " + (Integer.parseInt(hardware.group(1)) - 14);
     }
 
     private static boolean isDescriptive(String raw) {

@@ -4,7 +4,9 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.graphics.Color;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.LayerDrawable;
 import android.os.Bundle;
 import android.os.Build;
 import android.os.Handler;
@@ -575,7 +577,7 @@ public class MainActivity extends Activity {
         }
 
         tile.setOnClickListener(v -> openContent(item, historySection));
-        applyFocus(tile);
+        applyContentFocus(tile, ContentArtwork.resource(item));
         return margin(tile, 16);
     }
 
@@ -653,6 +655,30 @@ public class MainActivity extends Activity {
                 TvFocus.ensureVisible(view);
             }
         });
+    }
+
+    /** Content art is bundled with the app, so the cards stay complete without a network request. */
+    private void applyContentFocus(LinearLayout tile, int artwork) {
+        tile.setBackground(contentBackground(artwork, false));
+        tile.setOnFocusChangeListener((view, hasFocus) -> {
+            view.animate()
+                    .scaleX(hasFocus ? 1.055f : 1f)
+                    .scaleY(hasFocus ? 1.055f : 1f)
+                    .translationZ(hasFocus ? dp(12) : 0)
+                    .setDuration(140)
+                    .start();
+            tile.setBackground(contentBackground(artwork, hasFocus));
+            if (hasFocus) TvFocus.ensureVisible(view);
+        });
+    }
+
+    private Drawable contentBackground(int artwork, boolean focused) {
+        Drawable image = getDrawable(artwork);
+        GradientDrawable shade = new GradientDrawable();
+        shade.setColor(Color.argb(focused ? 96 : 132, 10, 13, 18));
+        shade.setCornerRadius(dp(28));
+        shade.setStroke(dp(focused ? 2 : 1), focused ? Color.WHITE : Color.argb(90, 255, 255, 255));
+        return new LayerDrawable(new Drawable[]{image, shade});
     }
 
     private void applyNavFocus(TextView v) {
