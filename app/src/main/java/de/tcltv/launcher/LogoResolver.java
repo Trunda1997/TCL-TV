@@ -7,7 +7,7 @@ public final class LogoResolver {
 
     public static DeviceBrand resolve(String raw) {
         String s = raw == null ? "" : raw.toLowerCase(Locale.ROOT);
-        if (containsAny(s, "playstation", "ps5", "ps 5", "sony interactive")) return DeviceBrand.PLAYSTATION;
+        if (containsAny(s, "playstation", "ps5", "ps4", "ps 5", "ps 4", "sony interactive")) return DeviceBrand.PLAYSTATION;
         if (containsAny(s, "xbox", "series x", "series s")) return DeviceBrand.XBOX;
         if (containsAny(s, "switch 2", "switch2", "nintendo switch 2")) return DeviceBrand.SWITCH2;
         if (containsAny(s, "nintendo", "switch")) return DeviceBrand.NINTENDO;

@@ -1,8 +1,8 @@
-TCL TV 0.1
+TCL TV 0.2.0
 
-Status:
-- standalone Android-TV project
-- native Java UI
-- HDMI logic adapted from TCL Home only
-- GitHub Actions APK build configured
-- provider/content integrations remain demo data in 0.1
+- Eigenständiger Android-TV-/Google-TV-Launcher: de.tcltv.launcher
+- Debug-APK: app/build/outputs/apk/debug/app-debug.apk
+- Build, Robolectric-Regressionstests und Android Lint über GitHub Actions
+- Technischer TCL-Home-Abgleich: docs/TCL-HOME-REFERENZ.md
+- Abnahme auf physischer TCL-Hardware ausstehend: docs/TV-TESTPLAN.md
+- Medien-/Weiterschauen-Inhalte bleiben Demodaten
