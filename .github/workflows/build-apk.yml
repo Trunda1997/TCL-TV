@@ -36,6 +36,14 @@ jobs:
         with:
           gradle-version: '8.13'
 
+      # GitHub runners are temporary. Keeping the generated debug key lets
+      # later test APKs update the installed TCL TV app with `adb install -r`.
+      - name: Preserve debug signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: tcl-tv-debug-signing-v1
+
       - name: Build debug APK
         run: gradle :app:assembleDebug --stacktrace
 

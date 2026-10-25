@@ -99,6 +99,8 @@ public class AppsAndSearchTest {
             assertTrue(screen.onBack());
             assertSame(music, activity.getWindow().getDecorView().findFocus());
             assertFalse(screen.onBack());
+            LinearLayout suggestions = screen.rows().get(3);
+            assertTrue("Apps page has installed recommendations", suggestions.getChildCount() > 0);
         }
     }
 
@@ -118,9 +120,15 @@ public class AppsAndSearchTest {
             EditText input = decor.findViewWithTag("tv-search-input");
             View search = decor.findViewWithTag("tv-search-submit");
             View cancel = decor.findViewWithTag("tv-search-cancel");
-            input.setText("Netflix");
+            input.setText("ne");
+            layout(decor);
             input.requestFocus();
             key(dialog, KeyEvent.KEYCODE_DPAD_DOWN);
+            View suggestion = decor.findViewWithTag("tv-search-suggestion:com.netflix.ninja");
+            assertNotNull(suggestion);
+            assertSame(suggestion, decor.findFocus());
+            for (int i = 0; i < 5 && decor.findFocus() != search; i++)
+                key(dialog, KeyEvent.KEYCODE_DPAD_DOWN);
             assertSame(search, decor.findFocus());
             key(dialog, KeyEvent.KEYCODE_DPAD_RIGHT);
             assertSame(cancel, decor.findFocus());

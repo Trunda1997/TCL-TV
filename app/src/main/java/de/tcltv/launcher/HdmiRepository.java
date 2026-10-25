@@ -14,9 +14,10 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -49,9 +50,12 @@ public final class HdmiRepository {
         String name() {
             DeviceBrand brand = brand();
             return brand != DeviceBrand.HDMI ? DeviceNames.displayName(brand, evidence())
-                    : safeName(!custom.isEmpty() ? custom : !metadata.isEmpty() ? metadata : label);
+                    : automaticHdmiName(custom, metadata, label, id);
         }
-        boolean recognized() { return brand() != DeviceBrand.HDMI || !"Externes Gerät".equals(name()); }
+        boolean recognized() {
+            return brand() != DeviceBrand.HDMI || isDescriptive(custom)
+                    || isDescriptive(metadata) || isDescriptive(label);
+        }
     }
 
     private static final class KnownDevice {
@@ -183,14 +187,18 @@ public final class HdmiRepository {
                 continue;
             }
             String stableId = match == null ? input.id : match.id;
-            String name = input.recognized() || match == null ? input.name() : match.name;
+            String automaticName = input.name();
+            InputDescriptor physicalPort = byId.get(input.anchor());
+            if (!input.recognized() && physicalPort != null && physicalPort != input)
+                automaticName = physicalPort.name();
+            String name = input.recognized() || match == null ? automaticName : match.name;
             DeviceBrand brand = input.recognized() || match == null ? input.brand() : match.brand;
             HdmiInput current = new HdmiInput(stableId, input.id, input.parentId, input.raw(),
                     name, input.state, brand, match != null && !input.recognized());
             current = withOverrides(current, stableId);
             result.add(current);
             if (match != null) usedKnown.add(match.id);
-            boolean trustworthy = current.brand != DeviceBrand.HDMI || !"Externes Gerät".equals(current.displayName);
+            boolean trustworthy = current.brand != DeviceBrand.HDMI || input.recognized();
             if (trustworthy) {
                 if (match == null && input.recognized() && !onPort.isEmpty()) replacedAnchors.add(input.anchor());
                 // Keep all non-privileged label/CEC evidence so that clearing a
@@ -278,11 +286,29 @@ public final class HdmiRepository {
         return value.toString().trim();
     }
 
+    private static final Pattern HDMI_PORT = Pattern.compile("(?i)\\bHDMI[\\s_-]*([1-9][0-9]?)\\b");
+
     static String safeName(String raw) {
         String name = raw == null ? "" : raw.trim();
-        if (name.isEmpty() || name.matches("(?i).*hdmi[\\s_-]*[0-9]*.*")
-                || name.matches("(?i)(input|source|port|eingang)[\\s_-]*[0-9]*") || name.contains("/")) return "Externes Gerät";
+        Matcher port = HDMI_PORT.matcher(name);
+        if (port.find()) return "HDMI " + port.group(1);
+        if (!isDescriptive(name)) return "HDMI";
         return name;
+    }
+
+    private static String automaticHdmiName(String... candidates) {
+        for (String candidate : candidates) if (isDescriptive(candidate)) return candidate.trim();
+        for (String candidate : candidates) {
+            Matcher port = HDMI_PORT.matcher(candidate == null ? "" : candidate);
+            if (port.find()) return "HDMI " + port.group(1);
+        }
+        return "HDMI";
+    }
+
+    private static boolean isDescriptive(String raw) {
+        String name = raw == null ? "" : raw.trim();
+        if (name.isEmpty() || HDMI_PORT.matcher(name).find() || name.contains("/")) return false;
+        return !name.matches("(?i)(hdmi|playback|recording|tuner|input|source|port|physical[ _-]?port|eingang|device|external|externes?[ _-]?ger[aä]t)[\\s_-]*[0-9]*");
     }
 
     private void loadKnownDevices() {
@@ -294,7 +320,7 @@ public final class HdmiRepository {
                 if (id.isEmpty() || anchor.isEmpty()) continue;
                 DeviceBrand brand = DeviceBrand.valueOf(entry.getString("brand"));
                 String name = safeName(entry.getString("name"));
-                if (brand == DeviceBrand.HDMI && name.equals("Externes Gerät")) continue;
+                if (brand == DeviceBrand.HDMI && !isDescriptive(name)) continue;
                 known.put(id, new KnownDevice(id, entry.optString("source", id), anchor,
                         entry.optString("raw", name), name, brand));
             }
@@ -334,7 +360,7 @@ public final class HdmiRepository {
             DeviceBrand automaticBrand = LogoResolver.resolve(device.raw + " " + device.sourceId + " " + device.anchorId);
             String automaticName = automaticBrand == DeviceBrand.HDMI
                     ? safeName(device.raw) : DeviceNames.displayName(automaticBrand, device.raw);
-            if (automaticBrand == DeviceBrand.HDMI && "Externes Gerät".equals(automaticName)) {
+            if (automaticBrand == DeviceBrand.HDMI && !isDescriptive(automaticName)) {
                 known.remove(id);
             } else {
                 known.put(id, new KnownDevice(id, device.sourceId, device.anchorId,

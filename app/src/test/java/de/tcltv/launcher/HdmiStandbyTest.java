@@ -163,7 +163,7 @@ public class HdmiStandbyTest {
         Shadows.shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(251));
         assertEquals(1, repository.list().size());
         assertEquals("physical-port", repository.list().get(0).id);
-        assertEquals("Externes Gerät", repository.list().get(0).displayName);
+        assertEquals("HDMI 2", repository.list().get(0).displayName);
         assertFalse(repository.list().get(0).remembered);
         repository.stop();
     }
@@ -209,7 +209,19 @@ public class HdmiStandbyTest {
         reported.add(parent(2));
         HdmiRepository repository = repository();
         repository.start(() -> {});
-        assertEquals("Externes Gerät", repository.list().get(0).displayName);
+        assertEquals("HDMI 2", repository.list().get(0).displayName);
+        assertEquals("[]", context.getSharedPreferences("hdmi_known_devices", 0).getString("entries", "[]"));
+        repository.stop();
+    }
+
+    @Test public void genericPlaybackChildUsesPortNumberAndIsNotRememberedAsADevice() {
+        reported.add(parent(2));
+        reported.add(device("playback_1", "playback_1"));
+        HdmiRepository repository = repository();
+        repository.start(() -> {});
+        assertEquals(1, repository.list().size());
+        assertEquals("HDMI 2", repository.list().get(0).displayName);
+        assertEquals("playback_1", repository.list().get(0).openId);
         assertEquals("[]", context.getSharedPreferences("hdmi_known_devices", 0).getString("entries", "[]"));
         repository.stop();
     }

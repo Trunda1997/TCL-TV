@@ -50,12 +50,14 @@ public class MainActivity extends Activity {
     private TvSearchDialog searchDialog;
     private HdmiRepository hdmiRepository;
     private AppRepository appRepository;
+    private ContentHistory contentHistory;
     private String currentTab = "Home";
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         hdmiRepository = new HdmiRepository(this);
         appRepository = new AppRepository(this);
+        contentHistory = new ContentHistory(this);
         favorites = new FavoriteApps(this);
         favorites.initialize(appRepository.installedTvApps());
         buildShell();
@@ -248,7 +250,7 @@ public class MainActivity extends Activity {
         spacer(26);
         section("Weiterschauen");
         LinearLayout row = addRow();
-        for (ContentItem item : demoContinue()) row.addView(contentCard(item, true));
+        for (ContentItem item : demoContinue()) row.addView(contentCard(item, true, "continue"));
     }
 
     private void refreshHomeHdmi() {
@@ -390,15 +392,26 @@ public class MainActivity extends Activity {
                 : new String[]{"Action", "Komödie", "Drama", "Sci-Fi", "Thriller", "Familie", "Animation"};
         for (String g : labels) genres.addView(genreTile(g));
 
+        List<ContentItem> history = contentHistory.list(series ? "series" : "movies");
+        if (!history.isEmpty()) {
+            spacer(24);
+            section(series ? "Zuletzt über TCL TV geöffnete Serien" : "Zuletzt über TCL TV geöffnete Filme");
+            LinearLayout recent = addRow();
+            for (ContentItem item : history)
+                recent.addView(contentCard(item, false, series ? "series" : "movies"));
+        }
+
         spacer(26);
         section(series ? "Empfohlene Serien" : "Empfohlene Filme");
         LinearLayout row = addRow();
-        for (ContentItem item : series ? demoSeries() : demoMovies()) row.addView(contentCard(item, false));
+        for (ContentItem item : series ? demoSeries() : demoMovies())
+            row.addView(contentCard(item, false, series ? "series" : "movies"));
 
         spacer(24);
         section("Neu & beliebt");
         LinearLayout row2 = addRow();
-        for (ContentItem item : series ? demoSeries2() : demoMovies2()) row2.addView(contentCard(item, false));
+        for (ContentItem item : series ? demoSeries2() : demoMovies2())
+            row2.addView(contentCard(item, false, series ? "series" : "movies"));
     }
 
     private void buildApps() {
@@ -460,16 +473,10 @@ public class MainActivity extends Activity {
         section("Live-TV-Apps");
         LinearLayout providers = addRow();
         for (String p : new String[]{"waipu.tv", "Zattoo", "Joyn", "RTL+", "ARD", "ZDF"}) providers.addView(providerTile(p));
-        spacer(26);
-        section("Jetzt im TV");
-        LinearLayout now = addRow();
-        for (ContentItem item : Arrays.asList(
-                new ContentItem("Tagesschau", "ARD", 45),
-                new ContentItem("heute journal", "ZDF", 18),
-                new ContentItem("Live Programm", "RTL+", 62),
-                new ContentItem("Sport", "waipu.tv", 30))) {
-            now.addView(contentCard(item, true));
-        }
+        spacer(18);
+        TextView note = text("Das aktuelle Programm wird direkt in der gewählten Live-TV-App angezeigt.", 14, false);
+        note.setTextColor(Color.rgb(210, 214, 220));
+        content.addView(note, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)));
     }
 
     private void buildBackgrounds() {
@@ -505,35 +512,52 @@ public class MainActivity extends Activity {
     private View providerTile(String name) {
         LinearLayout tile = cardLayout(dp(175), dp(98));
         tile.setGravity(Gravity.CENTER);
+        tile.setOrientation(LinearLayout.HORIZONTAL);
+        AppEntry app = ProviderResolver.find(appRepository.installedTvApps(), name);
+        if (app != null && app.icon != null) {
+            ImageView icon = new ImageView(this);
+            icon.setImageDrawable(app.icon);
+            icon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            tile.addView(icon, new LinearLayout.LayoutParams(dp(42), dp(42)));
+        }
         TextView t = text(name, 18, true);
         t.setGravity(Gravity.CENTER);
-        tile.addView(t, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        tile.addView(t, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
         tile.setOnClickListener(v -> launchProvider(name));
         applyFocus(tile);
         return margin(tile, 14);
     }
 
     private void launchProvider(String provider) {
-        String key = provider.toLowerCase(Locale.ROOT).replace("+", "").replace(" video", "").replace(".tv", "");
-        for (AppEntry app : appRepository.installedTvApps()) {
-            String n = app.name.toLowerCase(Locale.ROOT);
-            if (n.contains(key) || (key.equals("prime") && n.contains("amazon"))) {
-                LauncherUtils.launchPackage(this, app.packageName);
-                return;
-            }
-        }
+        AppEntry app = ProviderResolver.find(appRepository.installedTvApps(), provider);
+        if (app != null && LauncherUtils.launchPackage(this, app.packageName)) return;
         LauncherUtils.openPlayStore(this, provider);
     }
 
-    private View contentCard(ContentItem item, boolean showProgress) {
+    private View contentCard(ContentItem item, boolean showProgress, String historySection) {
         LinearLayout tile = cardLayout(dp(295), dp(showProgress ? 158 : 145));
         tile.setOrientation(LinearLayout.VERTICAL);
         tile.setPadding(dp(16), dp(12), dp(16), dp(12));
 
+        LinearLayout providerBadge = new LinearLayout(this);
+        providerBadge.setOrientation(LinearLayout.HORIZONTAL);
+        providerBadge.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        AppEntry providerApp = ProviderResolver.find(appRepository.installedTvApps(), item.provider);
+        if (providerApp != null && providerApp.icon != null) {
+            ImageView icon = new ImageView(this);
+            icon.setImageDrawable(providerApp.icon);
+            icon.setContentDescription(item.provider);
+            icon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            providerBadge.addView(icon, new LinearLayout.LayoutParams(dp(26), dp(26)));
+        }
         TextView provider = text(item.provider, 12, true);
-        provider.setGravity(Gravity.RIGHT);
+        provider.setGravity(Gravity.CENTER_VERTICAL | Gravity.RIGHT);
         provider.setTextColor(Color.rgb(222, 226, 232));
-        tile.addView(provider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(28)));
+        LinearLayout.LayoutParams providerText = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(28));
+        providerText.setMargins(dp(7), 0, 0, 0);
+        providerBadge.addView(provider, providerText);
+        tile.addView(providerBadge, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(30)));
 
         TextView title = text(item.title, 16, true);
         title.setGravity(Gravity.BOTTOM);
@@ -550,9 +574,33 @@ public class MainActivity extends Activity {
             tile.addView(bar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(7)));
         }
 
-        tile.setOnClickListener(v -> launchProvider(item.provider));
+        tile.setOnClickListener(v -> openContent(item, historySection));
         applyFocus(tile);
         return margin(tile, 16);
+    }
+
+    private void openContent(ContentItem item, String historySection) {
+        AppEntry provider = ProviderResolver.find(appRepository.installedTvApps(), item.provider);
+        if (provider == null) {
+            LauncherUtils.openPlayStore(this, item.provider);
+            return;
+        }
+        boolean opened = item.deepLink != null
+                && LauncherUtils.launchDeepLink(this, provider.packageName, item.deepLink);
+        if (!opened) opened = LauncherUtils.searchPackage(this, provider.packageName, item.title);
+        if (opened) {
+            if (historySection != null) contentHistory.record(historySection, item);
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(item.title)
+                .setMessage(item.provider + " stellt auf diesem Fernseher keinen offiziellen Direktlink für diesen Demo-Inhalt bereit.")
+                .setPositiveButton("Anbieter öffnen", (dialog, which) -> {
+                    if (LauncherUtils.launchPackage(this, provider.packageName) && historySection != null)
+                        contentHistory.record(historySection, item);
+                })
+                .setNegativeButton("Abbrechen", null)
+                .show();
     }
 
     private View genreTile(String title) {

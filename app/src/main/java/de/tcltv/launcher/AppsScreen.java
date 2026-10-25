@@ -29,6 +29,7 @@ public final class AppsScreen {
     private final List<LinearLayout> rows = new ArrayList<>();
     private final LinearLayout categories;
     private final LinearLayout results;
+    private final LinearLayout suggestions;
     private final TextView resultHeading;
     private final EnumMap<AppCategories.Category, TextView> categoryViews = new EnumMap<>(AppCategories.Category.class);
     private final Map<String, EnumSet<AppCategories.Category>> classification = new HashMap<>();
@@ -62,6 +63,8 @@ public final class AppsScreen {
         }
         resultHeading = heading("Installierte Apps");
         results = row();
+        heading("Vorschläge");
+        suggestions = row();
         refresh();
     }
 
@@ -112,10 +115,28 @@ public final class AppsScreen {
             empty.setTag("apps-empty");
             results.addView(empty);
         }
+        renderSuggestions();
         if (rowsChanged != null) rowsChanged.run();
         if (preserveFocus && previous != null) {
             View target = focusedTag == null ? null : results.findViewWithTag(focusedTag);
             TvFocus.reveal(target == null ? results.getChildAt(0) : target, View.FOCUS_DOWN);
+        }
+    }
+
+    private void renderSuggestions() {
+        suggestions.removeAllViews();
+        int count = 0;
+        for (AppEntry app : apps) {
+            EnumSet<AppCategories.Category> groups = classification.get(app.packageName);
+            if (groups == null || !groups.contains(AppCategories.Category.RECOMMENDED)) continue;
+            suggestions.addView(tileFactory.create(app));
+            if (++count == 12) break;
+        }
+        if (count == 0) {
+            for (AppEntry app : apps) {
+                suggestions.addView(tileFactory.create(app));
+                if (++count == 8) break;
+            }
         }
     }
 

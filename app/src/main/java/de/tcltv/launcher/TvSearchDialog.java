@@ -9,7 +9,9 @@ import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
@@ -22,7 +24,11 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /** A TV search with explicit edit/submit/cancel focus targets, independent of AlertDialog buttons. */
 public final class TvSearchDialog extends Dialog {
@@ -30,8 +36,10 @@ public final class TvSearchDialog extends Dialog {
     private final AppRepository apps;
     private final View opener;
     private SearchInput input;
+    private LinearLayout suggestions;
     private TextView submit;
     private TextView cancel;
+    private List<AppEntry> installed;
     private boolean editing;
 
     public TvSearchDialog(Activity activity, AppRepository apps) {
@@ -72,8 +80,14 @@ public final class TvSearchDialog extends Dialog {
         input.setPadding(dp(20), dp(10), dp(20), dp(10));
         input.setBackground(surface(Color.rgb(44, 48, 54), false));
         panel.addView(input, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(72)));
+        suggestions = new LinearLayout(activity);
+        suggestions.setOrientation(LinearLayout.VERTICAL);
+        suggestions.setClipChildren(false);
+        suggestions.setClipToPadding(false);
+        panel.addView(suggestions, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
         TextView hint = new TextView(activity);
-        hint.setText("OK: Texteingabe · Zurück: Tastatur schließen · ↓: Suchen");
+        hint.setText("Tippen zeigt Treffer · ↓: auswählen · Enter: ersten Treffer öffnen");
         hint.setTextColor(Color.LTGRAY);
         hint.setTextSize(13);
         hint.setPadding(0, dp(12), 0, dp(8));
@@ -90,8 +104,16 @@ public final class TvSearchDialog extends Dialog {
         actions.addView(cancel, new LinearLayout.LayoutParams(0, dp(62), 1));
         panel.addView(actions);
         setContentView(panel);
+        installed = apps.installedTvApps();
         wireFocus();
         input.setOnClickListener(view -> edit());
+        input.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence value, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence value, int start, int before, int count) {
+                updateSuggestions(value == null ? "" : value.toString());
+            }
+            @Override public void afterTextChanged(Editable value) { }
+        });
         input.setOnEditorActionListener((view, action, event) -> {
             boolean enter = event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER;
             if (action == EditorInfo.IME_ACTION_SEARCH || enter) {
@@ -136,7 +158,7 @@ public final class TvSearchDialog extends Dialog {
         cancel.setNextFocusLeftId(submit.getId());
         input.setOnKeyListener((view, key, event) -> {
             if (key == KeyEvent.KEYCODE_DPAD_DOWN) {
-                if (event.getAction() == KeyEvent.ACTION_DOWN) focusActions();
+                if (event.getAction() == KeyEvent.ACTION_DOWN) focusFirstResult();
                 return true;
             }
             if (key == KeyEvent.KEYCODE_DPAD_UP) return true;
@@ -150,7 +172,11 @@ public final class TvSearchDialog extends Dialog {
         for (TextView button : new TextView[]{submit, cancel}) {
             button.setOnKeyListener((view, key, event) -> {
                 if (key == KeyEvent.KEYCODE_DPAD_UP) {
-                    if (event.getAction() == KeyEvent.ACTION_DOWN) input.requestFocus();
+                    if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                        if (suggestions.getChildCount() > 0)
+                            suggestions.getChildAt(suggestions.getChildCount() - 1).requestFocus();
+                        else input.requestFocus();
+                    }
                     return true;
                 }
                 if (key == KeyEvent.KEYCODE_DPAD_DOWN) return true;
@@ -164,9 +190,44 @@ public final class TvSearchDialog extends Dialog {
         }
     }
 
-    private void focusActions() {
+    private void focusFirstResult() {
         hideKeyboard();
-        submit.requestFocus();
+        if (suggestions.getChildCount() > 0) suggestions.getChildAt(0).requestFocus();
+        else submit.requestFocus();
+    }
+
+    private void updateSuggestions(String query) {
+        suggestions.removeAllViews();
+        List<AppEntry> matches = rankedMatches(installed, query, 4);
+        for (int i = 0; i < matches.size(); i++) {
+            AppEntry app = matches.get(i);
+            TextView result = action(app.name, "tv-search-suggestion:" + app.packageName,
+                    () -> launch(app));
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(50));
+            params.setMargins(0, dp(6), 0, 0);
+            suggestions.addView(result, params);
+        }
+        wireSuggestionFocus();
+    }
+
+    private void wireSuggestionFocus() {
+        for (int i = 0; i < suggestions.getChildCount(); i++) {
+            View result = suggestions.getChildAt(i);
+            final int index = i;
+            result.setOnKeyListener((view, key, event) -> {
+                if (key != KeyEvent.KEYCODE_DPAD_UP && key != KeyEvent.KEYCODE_DPAD_DOWN) return false;
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    if (key == KeyEvent.KEYCODE_DPAD_UP) {
+                        if (index == 0) input.requestFocus();
+                        else suggestions.getChildAt(index - 1).requestFocus();
+                    } else if (index + 1 < suggestions.getChildCount()) {
+                        suggestions.getChildAt(index + 1).requestFocus();
+                    } else submit.requestFocus();
+                }
+                return true;
+            });
+        }
     }
 
     private void edit() {
@@ -193,27 +254,41 @@ public final class TvSearchDialog extends Dialog {
             return;
         }
         hideKeyboard();
-        List<AppEntry> installed = apps.installedTvApps();
-        String needle = AppCategories.normalize(query);
-        AppEntry match = null;
-        for (AppEntry app : installed) {
-            if (AppCategories.normalize(app.name).equals(needle)
-                    || AppCategories.normalize(app.packageName).equals(needle)) { match = app; break; }
+        List<AppEntry> matches = rankedMatches(installed, query, 1);
+        if (!matches.isEmpty()) launch(matches.get(0));
+        else { LauncherUtils.openPlayStore(activity, query); dismiss(); }
+    }
+
+    private void launch(AppEntry app) {
+        hideKeyboard();
+        if (!LauncherUtils.launchPackage(activity, app.packageName)) {
+            Toast.makeText(activity, "App konnte nicht gestartet werden.", Toast.LENGTH_SHORT).show();
+            submit.requestFocus();
+            return;
         }
-        if (match == null) {
-            for (AppEntry app : installed) {
-                if (AppCategories.normalize(app.name).contains(needle)
-                        || AppCategories.normalize(app.packageName).contains(needle)) { match = app; break; }
-            }
-        }
-        if (match != null) {
-            if (!LauncherUtils.launchPackage(activity, match.packageName)) {
-                Toast.makeText(activity, "App konnte nicht gestartet werden.", Toast.LENGTH_SHORT).show();
-                submit.requestFocus();
-                return;
-            }
-        } else LauncherUtils.openPlayStore(activity, query);
         dismiss();
+    }
+
+    static List<AppEntry> rankedMatches(List<AppEntry> entries, String query, int limit) {
+        List<AppEntry> result = new ArrayList<>();
+        if (entries == null || limit <= 0) return result;
+        String needle = AppCategories.normalize(query);
+        if (needle.isEmpty()) return result;
+        Map<String, AppEntry> exact = new LinkedHashMap<>(), prefix = new LinkedHashMap<>(), contains = new LinkedHashMap<>();
+        for (AppEntry app : entries) {
+            String name = AppCategories.normalize(app.name);
+            String pkg = AppCategories.normalize(app.packageName);
+            if (name.equals(needle) || pkg.equals(needle)) exact.put(app.packageName, app);
+            else if (name.startsWith(needle)) prefix.put(app.packageName, app);
+            else if (name.contains(needle) || pkg.contains(needle)) contains.put(app.packageName, app);
+        }
+        for (Map<String, AppEntry> group : Arrays.asList(exact, prefix, contains)) {
+            for (AppEntry app : group.values()) {
+                result.add(app);
+                if (result.size() == limit) return result;
+            }
+        }
+        return result;
     }
 
     private void back() {
@@ -262,7 +337,7 @@ public final class TvSearchDialog extends Dialog {
                 return true;
             }
             if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN && !editing) {
-                if (event.getAction() == KeyEvent.ACTION_DOWN) focusActions();
+                if (event.getAction() == KeyEvent.ACTION_DOWN) focusFirstResult();
                 return true;
             }
             return super.onKeyPreIme(keyCode, event);

@@ -1,6 +1,7 @@
 package de.tcltv.launcher;
 
 import android.app.Activity;
+import android.app.SearchManager;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.media.tv.TvContract;
@@ -35,6 +36,31 @@ public final class LauncherUtils {
         } catch (Exception e) {
             Toast.makeText(a, "Eingang konnte nicht direkt geöffnet werden.", Toast.LENGTH_LONG).show();
         }
+    }
+
+    /** Opens an official provider URI only when the intended installed package accepts it. */
+    public static boolean launchDeepLink(Activity a, String pkg, String uri) {
+        if (pkg == null || pkg.isEmpty() || uri == null || uri.isEmpty()) return false;
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(uri)).setPackage(pkg);
+            if (AppRepository.resolveLaunch(a.getPackageManager(), intent, pkg, a.getPackageName()) == null)
+                return false;
+            a.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            return true;
+        } catch (RuntimeException ignored) { return false; }
+    }
+
+    /** Uses an app's exported Android search activity; providers without one return false. */
+    public static boolean searchPackage(Activity a, String pkg, String query) {
+        if (pkg == null || pkg.isEmpty() || query == null || query.trim().isEmpty()) return false;
+        try {
+            Intent intent = new Intent(Intent.ACTION_SEARCH).setPackage(pkg)
+                    .putExtra(SearchManager.QUERY, query.trim());
+            if (AppRepository.resolveLaunch(a.getPackageManager(), intent, pkg, a.getPackageName()) == null)
+                return false;
+            a.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            return true;
+        } catch (RuntimeException ignored) { return false; }
     }
 
     public static boolean launchPackage(Activity a, String pkg) {
