@@ -2,7 +2,6 @@ package de.tcltv.launcher;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.content.pm.PackageManager;
 import android.media.tv.TvInputInfo;
 import android.media.tv.TvInputManager;
 import android.os.Handler;
@@ -17,7 +16,6 @@ public final class HdmiRepository {
     private final Context context;
     private final TvInputManager manager;
     private final SharedPreferences prefs;
-    private final PackageManager pm;
     private Listener listener;
 
     private final TvInputManager.TvInputCallback callback = new TvInputManager.TvInputCallback() {
@@ -31,7 +29,6 @@ public final class HdmiRepository {
         this.context = context;
         manager = (TvInputManager) context.getSystemService(Context.TV_INPUT_SERVICE);
         prefs = context.getSharedPreferences("hdmi_overrides", Context.MODE_PRIVATE);
-        pm = context.getPackageManager();
     }
 
     public void start(Listener l) {
@@ -50,7 +47,7 @@ public final class HdmiRepository {
         for (TvInputInfo info : manager.getTvInputList()) {
             CharSequence custom = null, normal = null;
             try { custom = info.loadCustomLabel(context); } catch (Exception ignored) {}
-            try { normal = info.loadLabel(pm); } catch (Exception ignored) {}
+            try { normal = info.loadLabel(context); } catch (Exception ignored) {}
             String raw = custom != null ? custom.toString() : normal != null ? normal.toString() : info.getId();
             boolean hdmi = info.getType() == TvInputInfo.TYPE_HDMI;
             boolean looksHdmi = raw.toLowerCase().contains("hdmi") || info.getId().toLowerCase().contains("hdmi");
